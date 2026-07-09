@@ -1,0 +1,17 @@
+{
+  "name": "iot-screen-backend",
+  "version": "1.0.0",
+  "description": "华为云 IoTDA 数据中继服务 — 定时轮询设备影子，供前端 Dashboard 使用",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "@huaweicloud/huaweicloud-sdk-iotda": "^3.1.202",
+    "axios": "^1.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "uuid": "^14.0.1"
+  }
+}

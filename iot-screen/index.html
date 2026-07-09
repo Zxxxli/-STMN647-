@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STM32N6 运动健康实时看板</title>
+
+<style>
+/* ================================================================
+   CSS 变量
+   ================================================================ */
+:root {
+  --bg-deep: #080d24;
+  --bg-panel: #0c1232;
+  --bg-card: rgba(14, 22, 55, 0.9);
+  --border-card: rgba(0, 212, 255, 0.2);
+  --accent-cyan: #00d4ff;
+  --accent-green: #00ff88;
+  --accent-yellow: #f0a500;
+  --accent-amber: #ff8c00;
+  --accent-red: #ff3b5c;
+  --accent-purple: #a855f7;
+  --text-primary: #e0e6f0;
+  --text-secondary: #8899bb;
+  --text-glow: #00ffcc;
+  --text-dim: #556688;
+  --glow-cyan: 0 0 12px rgba(0, 212, 255, 0.5);
+  --glow-green: 0 0 12px rgba(0, 255, 136, 0.5);
+  --glow-purple: 0 0 12px rgba(168, 85, 247, 0.5);
+  --glow-amber: 0 0 12px rgba(255, 140, 0, 0.5);
+}
+
+/* ================================================================
+   全局重置
+   ================================================================ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ================================================================
+   顶部标题栏
+   ================================================================ */
+.header {
+  text-align: center;
+  padding: 16px 0 8px;
+  position: relative;
+}
+.header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 4px;
+  background: linear-gradient(180deg, #fff 0%, var(--accent-cyan) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 12px rgba(0, 212, 255, 0.4));
+}
+.header .subtitle {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  letter-spacing: 2px;
+  margin-top: 3px;
+}
+.header .clock {
+  position: absolute;
+  right: 30px;
+  top: 20px;
+  font-size: 1.05rem;
+  color: var(--accent-cyan);
+  font-family: 'Consolas', 'Courier New', monospace;
+  letter-spacing: 2px;
+}
+.header::after {
+  content: '';
+  display: block;
+  width: 80%;
+  height: 1px;
+  margin: 10px auto 0;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-cyan) 50%, transparent 100%);
+}
+
+/* ================================================================
+   主布局（纵向 flex：上排运动卡片 + 下排图表/面板）
+   ================================================================ */
+.main-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 20px 10px;
+  height: calc(100vh - 150px);
+}
+
+/* ----- 上排：3 张等宽运动卡片 ----- */
+.exercise-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+/* ----- 下排：图表 + 右侧面板 ----- */
+.bottom-row {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2.4fr 1fr;
+  gap: 14px;
+  min-height: 0;
+}
+
+/* ================================================================
+   运动卡片（统一风格，顶部色条区分运动类型）
+   ================================================================ */
+.exercise-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  padding: 18px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.02);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+.exercise-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+.exercise-card.squat  { --ex-accent: var(--accent-cyan);   --ex-glow: var(--glow-cyan);   }
+.exercise-card.jack   { --ex-accent: var(--accent-purple); --ex-glow: var(--glow-purple); }
+.exercise-card.plank  { --ex-accent: var(--accent-amber);  --ex-glow: var(--glow-amber);  }
+
+.exercise-card.squat::before  { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green)); }
+.exercise-card.jack::before   { background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan)); }
+.exercise-card.plank::before  { background: linear-gradient(90deg, var(--accent-amber), var(--accent-yellow)); }
+
+/* 卡片标题 */
+.ex-card-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--ex-accent, var(--accent-cyan));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-shadow: var(--ex-glow, var(--glow-cyan));
+}
+.ex-card-title .icon { font-size: 1.3rem; }
+
+/* 卡片主体：环形图 + 大数字 */
+.ex-card-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* 环形进度 */
+.ring-wrap {
+  position: relative;
+  width: 90px; height: 90px;
+  flex-shrink: 0;
+}
+.ring-wrap svg { transform: rotate(-90deg); display: block; }
+.ring-bg { fill: none; stroke: rgba(255,255,255,0.07); stroke-width: 6; }
+.ring-fill { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+.ring-fill.squat-ring { stroke: var(--accent-cyan);   filter: drop-shadow(0 0 6px rgba(0,212,255,0.6)); }
+.ring-fill.jack-ring  { stroke: var(--accent-purple); filter: drop-shadow(0 0 6px rgba(168,85,247,0.6)); }
+.ring-fill.plank-ring { stroke: var(--accent-amber);  filter: drop-shadow(0 0 6px rgba(255,140,0,0.6)); }
+
+.ring-center {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.8rem; font-weight: 700; color: var(--text-secondary);
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+/* 大数字 */
+.ex-value-wrap { text-align: left; }
+.ex-big-num {
+  font-size: 3.2rem;
+  font-weight: 800;
+  color: var(--text-glow);
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-shadow: var(--glow-green);
+  line-height: 1;
+  display: block;
+}
+.ex-big-num.pop { animation: numPop 0.35s ease; }
+@keyframes numPop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.15); color: #fff; }
+  100% { transform: scale(1); }
+}
+.ex-target {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.ex-target span {
+  color: var(--ex-accent, var(--accent-cyan));
+  font-weight: 600;
+}
+
+/* ================================================================
+   质量参数区（卡片下半部分）
+   ================================================================ */
+.quality-section {
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  padding-top: 10px;
+}
+.quality-section .q-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* 单项质量参数 */
+.q-item {
+  margin-bottom: 10px;
+}
+.q-item:last-child { margin-bottom: 0; }
+
+.q-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.q-item-name {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+.q-item-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-glow);
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-shadow: var(--glow-green);
+}
+
+/* 进度条 */
+.q-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.q-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+.q-bar-fill.cyan  { background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan)); }
+.q-bar-fill.purple { background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan)); }
+.q-bar-fill.amber { background: linear-gradient(90deg, var(--accent-yellow), var(--accent-amber)); }
+
+.q-ref {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* 姿态指示灯 */
+.posture-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.posture-dot {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+.posture-dot.good {
+  background: var(--accent-green);
+  box-shadow: 0 0 14px var(--accent-green);
+}
+.posture-dot.bad {
+  background: var(--accent-red);
+  box-shadow: 0 0 14px var(--accent-red);
+  animation: blink 0.8s infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.posture-text {
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+/* 质量 mini 标签 */
+.quality-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.quality-tag {
+  font-size: 0.72rem;
+  padding: 3px 10px;
+  border-radius: 3px;
+  letter-spacing: 1px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-weight: 600;
+}
+.quality-tag.good { background: rgba(0,255,136,0.12); color: var(--accent-green); border: 1px solid rgba(0,255,136,0.3); }
+.quality-tag.warn { background: rgba(255,59,92,0.12); color: var(--accent-red); border: 1px solid rgba(255,59,92,0.3); }
+
+/* ================================================================
+   通用卡片（图表、评分、状态等用）
+   ================================================================ */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  padding: 16px;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.02);
+}
+.card-title {
+  font-size: 0.9rem;
+  color: var(--accent-cyan);
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(0, 212, 255, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-title::before {
+  content: '';
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: var(--accent-cyan);
+  box-shadow: var(--glow-cyan);
+}
+
+/* ================================================================
+   图表区
+   ================================================================ */
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.chart-card .card-title { flex-shrink: 0; }
+#mainChart { flex: 1; min-height: 0; }
+
+/* ================================================================
+   右侧面板（评分 + 统计 + 设备）
+   ================================================================ */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* 综合评分 */
+.score-card { text-align: center; }
+.score-number {
+  font-size: 3.6rem;
+  font-weight: 800;
+  color: var(--text-glow);
+  font-family: 'Consolas', 'Courier New', monospace;
+  text-shadow: var(--glow-green);
+  line-height: 1.1;
+}
+.score-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* 训练统计 */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-val {
+  color: var(--accent-cyan);
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+/* 设备信息 */
+.device-info {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 2.2;
+}
+.device-info span { color: var(--accent-cyan); }
+
+/* ================================================================
+   任务达标提示
+   ================================================================ */
+.completion-toast {
+  position: fixed;
+  top: -120px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  background: linear-gradient(135deg, rgba(0,20,50,0.95), rgba(0,40,80,0.95));
+  border: 2px solid var(--accent-green);
+  border-radius: 16px;
+  padding: 18px 36px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(0,255,136,0.4), 0 8px 32px rgba(0,0,0,0.6);
+  transition: top 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  pointer-events: none;
+}
+.completion-toast.show { top: 24px; }
+.completion-toast .toast-icon {
+  font-size: 2.4rem;
+  display: block;
+  animation: bounceIcon 0.6s ease infinite alternate;
+}
+@keyframes bounceIcon {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-8px); }
+}
+.completion-toast .toast-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--accent-green);
+  letter-spacing: 3px;
+  text-shadow: 0 0 16px rgba(0,255,136,0.7);
+  margin-top: 4px;
+}
+.completion-toast .toast-detail {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  letter-spacing: 1px;
+}
+.completion-toast .toast-confetti {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1.2rem;
+  animation: confettiRain 0.7s ease-out forwards;
+  opacity: 0;
+}
+@keyframes confettiRain {
+  0%   { opacity: 1; transform: translateX(-50%) translateY(-30px) scale(0); }
+  50%  { opacity: 1; transform: translateX(-50%) translateY(10px) scale(1.5); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(40px) scale(1); }
+}
+
+/* ================================================================
+   底部状态栏
+   ================================================================ */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 30px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  border-top: 1px solid rgba(0, 212, 255, 0.1);
+  background: rgba(0,0,0,0.3);
+}
+.status-dot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-dot::before {
+  content: '';
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ================================================================
+   响应式
+   ================================================================ */
+@media (min-width: 1920px) {
+  .header h1 { font-size: 2.6rem; }
+  .ex-big-num { font-size: 3.8rem; }
+  .main-container { padding: 12px 40px 14px; }
+  .ring-wrap { width: 100px; height: 100px; }
+}
+
+@media (max-width: 1366px) {
+  .main-container { height: auto; gap: 10px; padding: 6px 10px 8px; }
+  .exercise-row { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .bottom-row { grid-template-columns: 1.8fr 1fr; gap: 10px; min-height: 280px; }
+  .ex-big-num { font-size: 2.4rem; }
+  .ex-card-main { gap: 10px; }
+  .ring-wrap { width: 70px; height: 70px; }
+  .ring-wrap svg { width: 70px; height: 70px; }
+  .header h1 { font-size: 1.5rem; }
+  .exercise-card { padding: 14px; gap: 8px; }
+  .score-number { font-size: 2.8rem; }
+}
+
+@media (max-width: 768px) {
+  .main-container { flex-direction: column; height: auto; padding: 4px 6px; gap: 8px; }
+  .exercise-row { grid-template-columns: 1fr; gap: 8px; }
+  .bottom-row { grid-template-columns: 1fr; min-height: auto; }
+  .ex-big-num { font-size: 2rem; }
+  .ring-wrap { width: 64px; height: 64px; }
+  .ring-wrap svg { width: 64px; height: 64px; }
+  .header h1 { font-size: 1.1rem; letter-spacing: 1px; }
+  .header .clock { position: static; text-align: center; margin-top: 4px; }
+  .footer { flex-direction: column; gap: 4px; text-align: center; }
+  .score-number { font-size: 2.4rem; }
+  .exercise-card { padding: 12px; gap: 6px; }
+}
+</style>
+
+<!-- CDN -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.js"></script>
+
+</head>
+<body>
+
+<!-- ==================== 顶部标题栏 ==================== -->
+<header class="header">
+  <h1>STM32N6 运动健康实时看板</h1>
+  <div class="subtitle">Huawei Cloud IoT · AI Edge Computing · 深蹲 · 开合跳 · 平板支撑</div>
+  <div class="clock" id="liveClock">--:--:--</div>
+</header>
+
+<!-- ==================== 主布局 ==================== -->
+<div class="main-container">
+
+  <!-- ========== 上排：3 张运动卡片 ========== -->
+  <div class="exercise-row">
+
+    <!-- 深蹲 -->
+    <div class="exercise-card squat">
+      <div class="ex-card-title"><span class="icon">🏋️</span>深蹲</div>
+
+      <div class="ex-card-main">
+        <div class="ring-wrap">
+          <svg width="90" height="90" viewBox="0 0 90 90">
+            <circle class="ring-bg" cx="45" cy="45" r="38"/>
+            <circle class="ring-fill squat-ring" id="squatRing" cx="45" cy="45" r="38"
+                    stroke-dasharray="238.8" stroke-dashoffset="238.8"/>
+          </svg>
+          <div class="ring-center" id="squatPercent">0%</div>
+        </div>
+        <div class="ex-value-wrap">
+          <span class="ex-big-num" id="squatCount">0</span>
+          <div class="ex-target">目标 <span id="squatTarget">20</span> 次</div>
+        </div>
+      </div>
+
+      <div class="quality-section">
+        <div class="q-label">质量评估</div>
+
+        <div class="q-item">
+          <div class="q-item-header">
+            <span class="q-item-name">深蹲深度</span>
+            <span class="q-item-val" id="sqdeeVal">--</span>
+          </div>
+          <div class="q-bar"><div class="q-bar-fill cyan" id="sqdeeBar" style="width:0%"></div></div>
+          <div class="q-ref">最低标准 70（≥70 达标）</div>
+        </div>
+
+        <div class="q-item">
+          <div class="q-item-header">
+            <span class="q-item-name">背部倾斜度</span>
+            <span class="q-item-val" id="sqbacVal">--</span>
+          </div>
+          <div class="q-bar"><div class="q-bar-fill cyan" id="sqbacBar" style="width:0%"></div></div>
+          <div class="posture-indicator">
+            <div class="posture-dot good" id="sqbacDot"></div>
+            <span class="posture-text" id="sqbacText" style="color:var(--accent-green);">标准</span>
+          </div>
+          <div class="q-ref">正常范围 20° ~ 45°</div>
+        </div>
+
+        <div class="quality-tags">
+          <span class="quality-tag good" id="squatDepthTag">深度 --</span>
+          <span class="quality-tag good" id="squatBackTag">背部 标准</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 开合跳 -->
+    <div class="exercise-card jack">
+      <div class="ex-card-title"><span class="icon">🤸</span>开合跳</div>
+
+      <div class="ex-card-main">
+        <div class="ring-wrap">
+          <svg width="90" height="90" viewBox="0 0 90 90">
+            <circle class="ring-bg" cx="45" cy="45" r="38"/>
+            <circle class="ring-fill jack-ring" id="jackRing" cx="45" cy="45" r="38"
+                    stroke-dasharray="238.8" stroke-dashoffset="238.8"/>
+          </svg>
+          <div class="ring-center" id="jackPercent">0%</div>
+        </div>
+        <div class="ex-value-wrap">
+          <span class="ex-big-num" id="jackCount">0</span>
+          <div class="ex-target">目标 <span id="jackTarget">20</span> 次</div>
+        </div>
+      </div>
+
+      <div class="quality-section">
+        <div class="q-label">质量评估</div>
+
+        <div class="q-item">
+          <div class="q-item-header">
+            <span class="q-item-name">舒展度</span>
+            <span class="q-item-val" id="jopenVal">--</span>
+          </div>
+          <div class="q-bar"><div class="q-bar-fill purple" id="jopenBar" style="width:0%"></div></div>
+          <div class="q-ref">参考范围 0 ~ 100</div>
+        </div>
+
+        <div class="quality-tags">
+          <span class="quality-tag good" id="jackOpenTag">舒展度 --</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 平板支撑 -->
+    <div class="exercise-card plank">
+      <div class="ex-card-title"><span class="icon">🧘</span>平板支撑</div>
+
+      <div class="ex-card-main">
+        <div class="ring-wrap">
+          <svg width="90" height="90" viewBox="0 0 90 90">
+            <circle class="ring-bg" cx="45" cy="45" r="38"/>
+            <circle class="ring-fill plank-ring" id="plankRing" cx="45" cy="45" r="38"
+                    stroke-dasharray="238.8" stroke-dashoffset="238.8"/>
+          </svg>
+          <div class="ring-center" id="plankPercent">0%</div>
+        </div>
+        <div class="ex-value-wrap">
+          <span class="ex-big-num" id="plankTime" style="font-size:2.4rem;">0:00</span>
+          <div class="ex-target">目标 <span id="plankTarget">30</span> 秒</div>
+        </div>
+      </div>
+
+      <div class="quality-section">
+        <div class="q-label">质量评估</div>
+
+        <div class="q-item">
+          <div class="q-item-header">
+            <span class="q-item-name">支撑时长</span>
+            <span class="q-item-val" id="pbtimVal">0s</span>
+          </div>
+          <div class="q-bar"><div class="q-bar-fill amber" id="pbtimBar" style="width:0%"></div></div>
+          <div class="q-ref">目标 30 秒</div>
+        </div>
+
+        <div class="q-item">
+          <div class="q-item-header">
+            <span class="q-item-name">姿态评估</span>
+          </div>
+          <div class="posture-indicator">
+            <div class="posture-dot good" id="pbbodDot"></div>
+            <span class="posture-text" id="pbbodText" style="color:var(--accent-green);">标准</span>
+          </div>
+          <div class="q-ref">0=姿态标准 &nbsp; 1=姿态异常</div>
+        </div>
+
+        <div class="quality-tags">
+          <span class="quality-tag good" id="plankTimeTag">计时 --</span>
+          <span class="quality-tag good" id="plankBodyTag">姿态 标准</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /exercise-row -->
+
+  <!-- ========== 下排：图表 + 右侧面板 ========== -->
+  <div class="bottom-row">
+
+    <!-- 趋势图 -->
+    <div class="card chart-card">
+      <div class="card-title">📈 实时趋势</div>
+      <div id="mainChart"></div>
+    </div>
+
+    <!-- 右侧面板 -->
+    <div class="side-panel">
+      <!-- 综合评分 -->
+      <div class="card score-card">
+        <div class="card-title">⭐ 综合评分</div>
+        <div class="score-number" id="overallScore">--</div>
+        <div class="score-sub">满分 100</div>
+      </div>
+
+      <!-- 训练统计 -->
+      <div class="card">
+        <div class="card-title">📊 训练统计</div>
+        <div class="stat-row">
+          <span>训练时长</span>
+          <span class="stat-val" id="trainDuration">00:00</span>
+        </div>
+        <div class="stat-row">
+          <span>总动作次数</span>
+          <span class="stat-val" id="totalMoves">0</span>
+        </div>
+        <div class="stat-row">
+          <span>深蹲达标率</span>
+          <span class="stat-val" id="squatRate">0%</span>
+        </div>
+        <div class="stat-row">
+          <span>开合跳达标率</span>
+          <span class="stat-val" id="jackRate">0%</span>
+        </div>
+        <div class="stat-row">
+          <span>平板支撑达标率</span>
+          <span class="stat-val" id="plankRate">0%</span>
+        </div>
+      </div>
+
+      <!-- 设备状态 -->
+      <div class="card">
+        <div class="card-title">📡 设备状态</div>
+        <div class="device-info">
+          <div>设备ID：<span>stmn6_test</span></div>
+          <div>连接：<span style="color:var(--accent-green);" id="connStatus">● 等待连接</span></div>
+          <div>上报间隔：<span>2s</span></div>
+          <div>今日数据点：<span id="dataPointCount">0</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /bottom-row -->
+
+</div><!-- /main-container -->
+
+<!-- ==================== 底部状态栏 ==================== -->
+<footer class="footer">
+  <span class="status-dot" id="footerStatus">系统运行中</span>
+  <span>Huawei Cloud IoTDA</span>
+  <span>STM32N6 Edge AI</span>
+</footer>
+
+<!-- ============ JavaScript 数据引擎 ============ -->
+<script>
+// ==========================================
+// 一、全局配置
+// ==========================================
+const CONFIG = {
+  USE_SIMULATED: false,
+  API_URL: 'http://localhost:3001/api/dashboard',
+  REPORT_INTERVAL: 500,
+  BUFFER_SIZE: 30,
+
+  // 各动作目标
+  targets: {
+    squat: 20,
+    jack:  20,
+    plank: 30      // 平板支撑目标 30 秒
+  }
+};
+
+// ==========================================
+// 二、数据缓冲区
+// ==========================================
+const dataBuffer = [];
+const chartTimeData  = [];
+const chartSquatData = [];
+const chartJackData  = [];
+const chartPlankData = [];
+
+// ==========================================
+// 三、ECharts 初始化
+// ==========================================
+const chartDom = document.getElementById('mainChart');
+const myChart = echarts.init(chartDom, 'dark');
+
+const chartOption = {
+  backgroundColor: 'transparent',
+  toolbox: {
+    right: 10,
+    feature: {
+      saveAsImage: { title: '保存图片', backgroundColor: 'transparent' }
+    },
+    iconStyle: { borderColor: '#8899bb' }
+  },
+  legend: {
+    top: 5,
+    textStyle: { color: '#8899bb', fontSize: 11 },
+    itemWidth: 16, itemHeight: 8,
+    data: ['深蹲', '开合跳', '平板支撑']
+  },
+  tooltip: {
+    trigger: 'axis',
+    backgroundColor: 'rgba(12,18,50,0.9)',
+    borderColor: 'rgba(0,212,255,0.3)',
+    textStyle: { color: '#e0e6f0', fontSize: 12 }
+  },
+  grid: {
+    left: '3%', right: '5%', top: '18%', bottom: '8%',
+    containLabel: true
+  },
+  xAxis: {
+    type: 'category',
+    boundaryGap: false,
+    data: chartTimeData,
+    axisLine: { lineStyle: { color: 'rgba(0,212,255,0.2)' } },
+    axisTick: { show: false },
+    axisLabel: { color: '#8899bb', fontSize: 10 },
+    splitLine: { show: false }
+  },
+  yAxis: {
+    type: 'value',
+    name: '数值',
+    nameTextStyle: { color: '#8899bb', fontSize: 10 },
+    axisLine: { show: false },
+    axisTick: { show: false },
+    axisLabel: { color: '#8899bb', fontSize: 10 },
+    splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
+  },
+  series: [
+    {
+      name: '深蹲',
+      type: 'line',
+      data: chartSquatData,
+      smooth: true,
+      symbol: 'circle', symbolSize: 4,
+      showSymbol: false,
+      lineStyle: { width: 2, color: '#00d4ff', shadowBlur: 8, shadowColor: 'rgba(0,212,255,0.5)' },
+      itemStyle: { color: '#00d4ff' },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(0,212,255,0.22)' },
+          { offset: 1, color: 'rgba(0,212,255,0.01)' }
+        ])
+      }
+    },
+    {
+      name: '开合跳',
+      type: 'line',
+      data: chartJackData,
+      smooth: true,
+      symbol: 'circle', symbolSize: 4,
+      showSymbol: false,
+      lineStyle: { width: 2, color: '#a855f7', shadowBlur: 8, shadowColor: 'rgba(168,85,247,0.5)' },
+      itemStyle: { color: '#a855f7' },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(168,85,247,0.22)' },
+          { offset: 1, color: 'rgba(168,85,247,0.01)' }
+        ])
+      }
+    },
+    {
+      name: '平板支撑',
+      type: 'line',
+      data: chartPlankData,
+      smooth: true,
+      symbol: 'circle', symbolSize: 4,
+      showSymbol: false,
+      lineStyle: { width: 2, color: '#ff8c00', shadowBlur: 8, shadowColor: 'rgba(255,140,0,0.5)' },
+      itemStyle: { color: '#ff8c00' },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(255,140,0,0.22)' },
+          { offset: 1, color: 'rgba(255,140,0,0.01)' }
+        ])
+      }
+    }
+  ],
+  animation: true,
+  animationDuration: 800,
+  animationEasing: 'cubicOut'
+};
+
+myChart.setOption(chartOption);
+
+window.addEventListener('resize', () => { myChart.resize(); });
+
+function updateChart(data) {
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false });
+
+  chartTimeData.push(timeStr);
+  chartSquatData.push(data.exercises.squat.count);
+  chartJackData.push(data.exercises.jack.count);
+  chartPlankData.push(data.exercises.plank.time);
+
+  if (chartTimeData.length > CONFIG.BUFFER_SIZE) {
+    chartTimeData.shift();
+    chartSquatData.shift();
+    chartJackData.shift();
+    chartPlankData.shift();
+  }
+
+  myChart.setOption({
+    xAxis: { data: [...chartTimeData] },
+    series: [
+      { data: [...chartSquatData] },
+      { data: [...chartJackData] },
+      { data: [...chartPlankData] }
+    ]
+  });
+}
+
+// ==========================================
+// 四、模拟数据生成器（调试用）
+// ==========================================
+const _state = {
+  squat: 0,
+  jack:  0,
+  plank: 0,
+  startTime: new Date(),
+  dataPointCount: 0,
+  plankTrend: 0
+};
+
+function generateMockData() {
+  _state.squat += Math.floor(Math.random() * 3);
+  _state.jack  += Math.floor(Math.random() * 3);
+
+  // 平板支撑计时：缓慢累加模拟持续撑住，偶尔重置
+  _state.plankTrend += Math.floor(Math.random() * 5);
+  if (Math.random() < 0.05) _state.plankTrend = 0;
+  _state.plank = Math.min(_state.plankTrend, 120);
+
+  _state.dataPointCount++;
+
+  const sqdee = 55 + Math.random() * 40;           // 深蹲深度 55~95
+  const sqbac = 10 + Math.random() * 50;           // 背部倾斜度 10°~60°
+  const jopen = 40 + Math.random() * 50;           // 舒展度 40~90
+  const pbtim = _state.plank;
+  const pbbod = Math.random() < 0.75 ? 0 : 1;
+
+  return {
+    timestamp: new Date().toISOString(),
+    exercises: {
+      squat: { count: _state.squat, target: CONFIG.targets.squat, sqdee, sqbac },
+      jack:  { count: _state.jack,  target: CONFIG.targets.jack,  jopen },
+      plank: { time:  pbtim,        target: CONFIG.targets.plank, pbbod }
+    },
+    overall_score: 0
+  };
+}
+
+// ==========================================
+// 五、工具函数
+// ==========================================
+
+/** 秒数 → MM:SS 格式 */
+function fmtTime(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  return m + ':' + String(s % 60).padStart(2, '0');
+}
+
+/** 环形进度周长 (r=38) */
+const RING_CIRCUM = 2 * Math.PI * 38;  // ≈ 238.8
+
+function updateRing(ringId, percentId, value, target) {
+  const ratio = Math.min(1, target > 0 ? value / target : 0);
+  const offset = RING_CIRCUM * (1 - ratio);
+  document.getElementById(ringId).setAttribute('stroke-dashoffset', offset);
+  document.getElementById(percentId).textContent = Math.round(ratio * 100) + '%';
+}
+
+// ==========================================
+// 六、UI 更新函数
+// ==========================================
+
+/** 带弹跳动画的数字更新 */
+function setPopNum(id, val, prev) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  if (val !== prev) {
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  }
+}
+
+/** 更新计数/计时卡片 */
+function updateCounterCards(exercises) {
+  const prevSquat = parseInt(document.getElementById('squatCount').textContent) || 0;
+  const prevJack  = parseInt(document.getElementById('jackCount').textContent)  || 0;
+  const prevPlank = parseInt(document.getElementById('pbtimVal').dataset?.raw)  || 0;
+
+  setPopNum('squatCount', exercises.squat.count, prevSquat);
+  setPopNum('jackCount',  exercises.jack.count,  prevJack);
+
+  updateRing('squatRing', 'squatPercent', exercises.squat.count, CONFIG.targets.squat);
+  updateRing('jackRing',  'jackPercent',  exercises.jack.count,  CONFIG.targets.jack);
+
+  // 平板支撑计时（显示格式化时间）
+  const pt = exercises.plank.time;
+  const ptPrev = (document.getElementById('pbtimVal').dataset?.raw) ? parseInt(document.getElementById('pbtimVal').dataset.raw) : 0;
+  document.getElementById('plankTime').textContent = fmtTime(pt);
+  setPopNum('pbtimVal', pt + 's', ptPrev);
+  if (document.getElementById('pbtimVal').dataset) {
+    document.getElementById('pbtimVal').dataset.raw = pt;
+  } else {
+    document.getElementById('pbtimVal').setAttribute('data-raw', pt);
+  }
+  document.getElementById('pbtimBar').style.width = Math.min(100, (pt / CONFIG.targets.plank) * 100) + '%';
+  updateRing('plankRing', 'plankPercent', pt, CONFIG.targets.plank);
+
+  // 计时标签
+  const timeTag = document.getElementById('plankTimeTag');
+  timeTag.textContent = '计时 ' + fmtTime(pt);
+  timeTag.className = 'quality-tag ' + (pt >= CONFIG.targets.plank * 0.5 ? 'good' : 'warn');
+}
+
+/** 更新深蹲质量 */
+function updateSquatQuality(ex) {
+  // 深蹲深度：最低标准 70
+  const sqdee = ex.sqdee ?? 0;
+  document.getElementById('sqdeeVal').textContent = sqdee.toFixed(1);
+  document.getElementById('sqdeeBar').style.width = Math.min(100, Math.max(0, sqdee)) + '%';
+
+  const depthTag = document.getElementById('squatDepthTag');
+  depthTag.textContent = '深度 ' + sqdee.toFixed(0);
+  depthTag.className = 'quality-tag ' + (sqdee >= 70 ? 'good' : 'warn');
+
+  // 背部倾斜度：20°~45°=标准, <20°=太直, >45°=太斜
+  const sqbac = ex.sqbac ?? 0;
+  document.getElementById('sqbacVal').textContent = sqbac.toFixed(0) + '°';
+  // 倾斜度可视范围 0~90，映射到进度条
+  document.getElementById('sqbacBar').style.width = Math.min(100, Math.max(0, (sqbac / 90) * 100)) + '%';
+
+  const dot  = document.getElementById('sqbacDot');
+  const text = document.getElementById('sqbacText');
+  if (sqbac >= 20 && sqbac <= 45) {
+    dot.className = 'posture-dot good';
+    text.textContent = '标准';
+    text.style.color = 'var(--accent-green)';
+  } else if (sqbac < 20) {
+    dot.className = 'posture-dot bad';
+    text.textContent = '太直';
+    text.style.color = 'var(--accent-yellow)';
+  } else {
+    dot.className = 'posture-dot bad';
+    text.textContent = '太斜';
+    text.style.color = 'var(--accent-red)';
+  }
+
+  const backTag = document.getElementById('squatBackTag');
+  const backLabel = sqbac >= 20 && sqbac <= 45 ? '标准' : (sqbac < 20 ? '太直' : '太斜');
+  const backOK = sqbac >= 20 && sqbac <= 45;
+  backTag.textContent = '背部 ' + backLabel;
+  backTag.className = 'quality-tag ' + (backOK ? 'good' : 'warn');
+}
+
+/** 更新开合跳质量 */
+function updateJackQuality(ex) {
+  const jopen = ex.jopen ?? 0;
+  document.getElementById('jopenVal').textContent = jopen.toFixed(1);
+  document.getElementById('jopenBar').style.width = Math.min(100, Math.max(0, jopen)) + '%';
+
+  const openTag = document.getElementById('jackOpenTag');
+  openTag.textContent = '舒展度 ' + jopen.toFixed(0);
+  openTag.className = 'quality-tag ' + (jopen >= 40 ? 'good' : 'warn');
+}
+
+/** 更新平板支撑质量 */
+function updatePlankQuality(ex) {
+  const pbbod = ex.pbbod ?? 0;
+  const dot   = document.getElementById('pbbodDot');
+  const text  = document.getElementById('pbbodText');
+  if (pbbod === 0) {
+    dot.className = 'posture-dot good';
+    text.textContent = '标准';
+    text.style.color = 'var(--accent-green)';
+  } else {
+    dot.className = 'posture-dot bad';
+    text.textContent = '异常';
+    text.style.color = 'var(--accent-red)';
+  }
+
+  const bodyTag = document.getElementById('plankBodyTag');
+  bodyTag.textContent = '姿态 ' + (pbbod === 0 ? '标准' : '异常');
+  bodyTag.className = 'quality-tag ' + (pbbod === 0 ? 'good' : 'warn');
+}
+
+/** 更新综合评分 */
+function updateOverallScore(score) {
+  document.getElementById('overallScore').textContent = score;
+}
+
+/** 更新训练统计 */
+function updateTrainingStats(exercises) {
+  const squatCount = exercises.squat.count;
+  const jackCount  = exercises.jack.count;
+  const plankTime  = exercises.plank.time;
+  const total = squatCount + jackCount;
+  document.getElementById('totalMoves').textContent = total;
+
+  const squatRate = Math.round(Math.min(1, squatCount / CONFIG.targets.squat) * 100);
+  const jackRate  = Math.round(Math.min(1, jackCount  / CONFIG.targets.jack)  * 100);
+  const plankRate = Math.round(Math.min(1, plankTime  / CONFIG.targets.plank) * 100);
+  document.getElementById('squatRate').textContent = squatRate + '%';
+  document.getElementById('jackRate').textContent  = jackRate  + '%';
+  document.getElementById('plankRate').textContent = plankRate + '%';
+
+  const elapsed = Math.floor((new Date() - _state.startTime) / 1000);
+  document.getElementById('trainDuration').textContent = fmtTime(elapsed);
+
+  document.getElementById('dataPointCount').textContent = _state.dataPointCount;
+}
+
+/** 计算综合评分（含平板支撑） */
+function calcOverallScore(exercises) {
+  const sqdee = exercises.squat.sqdee ?? 0;
+  const sqbac = exercises.squat.sqbac ?? 0;
+  const jopen = exercises.jack.jopen  ?? 0;
+  const pbbod = exercises.plank.pbbod ?? 0;
+  const pbtim = exercises.plank.time  ?? 0;
+
+  // 深蹲深度：≥70 满分，低于70按比例扣分
+  const depthScore = Math.min(100, (sqdee / 70) * 100);
+
+  // 背部倾斜度：20~45=100分，偏离越远分越低
+  let backScore;
+  if (sqbac >= 20 && sqbac <= 45) {
+    backScore = 100;
+  } else if (sqbac < 20) {
+    backScore = Math.max(10, 100 - (20 - sqbac) * 4);  // 太直，每偏离1°扣4分
+  } else {
+    backScore = Math.max(10, 100 - (sqbac - 45) * 4);  // 太斜，每偏离1°扣4分
+  }
+
+  const squatComp = Math.min(1, exercises.squat.count / CONFIG.targets.squat) * 100;
+  const squatTotal = depthScore * 0.35 + backScore * 0.25 + squatComp * 0.40;
+
+  // 开合跳：舒展度 60% + 完成度 40%
+  const openScore = Math.min(100, jopen);
+  const jackComp = Math.min(1, exercises.jack.count / CONFIG.targets.jack) * 100;
+  const jackTotal = openScore * 0.60 + jackComp * 0.40;
+
+  // 平板支撑：姿态 40% + 时长完成度 60%
+  const bodyScore = pbbod === 0 ? 100 : 30;
+  const plankComp = Math.min(1, pbtim / CONFIG.targets.plank) * 100;
+  const plankTotal = bodyScore * 0.40 + plankComp * 0.60;
+
+  return Math.round((squatTotal + jackTotal + plankTotal) / 3);
+}
+
+// ==========================================
+// 七、统一数据入口
+// ==========================================
+
+/** 任务达标状态追踪 */
+let _taskCompletedShown = false;
+
+function checkTaskCompletion(exercises) {
+  const squatOK = exercises.squat.count >= CONFIG.targets.squat;
+  const jackOK  = exercises.jack.count  >= CONFIG.targets.jack;
+  const plankOK = exercises.plank.time  >= CONFIG.targets.plank;
+  const allDone = squatOK && jackOK && plankOK;
+
+  // 更新每个卡片的标题指示（达标打勾）
+  document.querySelector('.exercise-card.squat .ex-card-title').style.color =
+    squatOK ? 'var(--accent-green)' : '';
+  document.querySelector('.exercise-card.jack .ex-card-title').style.color =
+    jackOK ? 'var(--accent-green)' : '';
+  document.querySelector('.exercise-card.plank .ex-card-title').style.color =
+    plankOK ? 'var(--accent-green)' : '';
+
+  if (allDone && !_taskCompletedShown) {
+    _taskCompletedShown = true;
+    showCompletionToast(exercises);
+  }
+}
+
+function showCompletionToast(exercises) {
+  const toast = document.getElementById('completionToast');
+  const detail = document.getElementById('toastDetail');
+  detail.textContent =
+    '深蹲 ' + exercises.squat.count + '/' + CONFIG.targets.squat +
+    '  ·  开合跳 ' + exercises.jack.count + '/' + CONFIG.targets.jack +
+    '  ·  平板支撑 ' + fmtTime(exercises.plank.time) + '/' + fmtTime(CONFIG.targets.plank);
+
+  // 滑入
+  setTimeout(() => { toast.classList.add('show'); }, 100);
+
+  // 5 秒后自动消失
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 5000);
+}
+
+function handleIncomingData(data) {
+  data.overall_score = calcOverallScore(data.exercises);
+
+  dataBuffer.push(data);
+  if (dataBuffer.length > CONFIG.BUFFER_SIZE) {
+    dataBuffer.shift();
+  }
+
+  updateChart(data);
+  updateCounterCards(data.exercises);
+  updateSquatQuality(data.exercises.squat);
+  updateJackQuality(data.exercises.jack);
+  updatePlankQuality(data.exercises.plank);
+  updateOverallScore(data.overall_score);
+  updateTrainingStats(data.exercises);
+  checkTaskCompletion(data.exercises);
+
+  console.log('📥', JSON.stringify(data.exercises));
+}
+
+// ==========================================
+// 八、API 数据转换
+// ==========================================
+
+/**
+ * 将后端 API 格式转换为前端统一格式
+ * API 返回: { squat, jumpe, pbtim, sqdee, sqbac, jopen, pbbod, score, online, timestamp }
+ */
+function transformApiData(apiData) {
+  if (!apiData || !apiData.online) return null;
+
+  const squatVal = apiData.squat ?? 0;
+  const jackVal  = apiData.jumpe ?? 0;
+  const pbtimVal = apiData.pbtim ?? 0;
+  const sqdeeVal = apiData.sqdee ?? 0;
+  const sqbacVal = apiData.sqbac ?? 0;
+  const jopenVal = apiData.jopen ?? 0;
+  const pbbodVal = apiData.pbbod ?? 0;
+
+  return {
+    timestamp: apiData.timestamp || new Date().toISOString(),
+    exercises: {
+      squat: {
+        count:  squatVal,
+        target: CONFIG.targets.squat,
+        sqdee:  sqdeeVal,
+        sqbac:  sqbacVal
+      },
+      jack: {
+        count:  jackVal,
+        target: CONFIG.targets.jack,
+        jopen:  jopenVal
+      },
+      plank: {
+        time:   pbtimVal,
+        target: CONFIG.targets.plank,
+        pbbod:  pbbodVal
+      }
+    },
+    overall_score: apiData.score || 80
+  };
+}
+
+/** 从后端 API 拉取数据 */
+async function fetchFromApi() {
+  try {
+    const res = await fetch(CONFIG.API_URL);
+    const apiData = await res.json();
+    const transformed = transformApiData(apiData);
+    if (transformed) {
+      handleIncomingData(transformed);
+      document.getElementById('connStatus').innerHTML = '● 已连接华为云';
+      document.getElementById('connStatus').style.color = 'var(--accent-green)';
+      document.getElementById('footerStatus').textContent = '华为云在线 · STM32N6';
+    }
+  } catch (e) {
+    console.warn('⚠️ API 请求失败:', e.message);
+  }
+}
+
+/** 模拟数据模式 */
+function runSimulated() {
+  const mock = generateMockData();
+  handleIncomingData(mock);
+  document.getElementById('connStatus').innerHTML = '● 模拟数据模式';
+  document.getElementById('connStatus').style.color = 'var(--accent-yellow)';
+  document.getElementById('footerStatus').textContent = '模拟数据 · 调试模式';
+}
+
+// 启动数据源
+if (CONFIG.USE_SIMULATED) {
+  console.log('🎭 数据源: 模拟数据（调试模式）');
+  runSimulated();
+  setInterval(runSimulated, CONFIG.REPORT_INTERVAL);
+} else {
+  console.log('🔗 数据源: Node 后端轮询 IoTDA，间隔 ' + CONFIG.REPORT_INTERVAL + 'ms');
+  fetchFromApi();
+  setInterval(fetchFromApi, CONFIG.REPORT_INTERVAL);
+}
+
+// ==========================================
+// 九、实时时钟
+// ==========================================
+function updateClock() {
+  const now = new Date();
+  document.getElementById('liveClock').textContent =
+    now.toLocaleTimeString('zh-CN', { hour12: false });
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ==========================================
+// 十、MQTT 连接模块（预留）
+// ==========================================
+const HUAWEI_CONFIG = {
+  wssUrl: 'wss://${YOUR_IOTDA_ENDPOINT}.iotda-device.cn-north-4.myhuaweicloud.com:443/mqtt',
+  deviceId: '${YOUR_DEVICE_ID}',
+  deviceSecret: '${YOUR_DEVICE_SECRET}',
+  topic: '$oc/devices/${YOUR_DEVICE_ID}/sys/properties/report',
+
+  getConnectionOptions() {
+    const now = new Date();
+    const ts = now.getUTCFullYear().toString()
+      + String(now.getUTCMonth() + 1).padStart(2, '0')
+      + String(now.getUTCDate()).padStart(2, '0')
+      + String(now.getUTCHours()).padStart(2, '0');
+    const clientId = this.deviceId + '_0_0_' + ts;
+    const password = CryptoJS.HmacSHA256(this.deviceSecret, ts).toString();
+    console.log('🔑 UTC时间戳:', ts);
+    console.log('🔑 ClientID:', clientId);
+    console.log('🔑 Password:', password);
+    return { clientId, username: this.deviceId, password };
+  }
+};
+
+let mqttClient = null;
+
+function mqttConnect() {
+  console.log('🔌 正在连接华为云 IoTDA...');
+  const connOpts = HUAWEI_CONFIG.getConnectionOptions();
+
+  mqttClient = mqtt.connect(HUAWEI_CONFIG.wssUrl, {
+    connectTimeout: 4000,
+    clientId: connOpts.clientId,
+    username: connOpts.username,
+    password: connOpts.password,
+    keepalive: 120,
+    clean: true
+  });
+
+  mqttClient.on('connect', () => {
+    console.log('✅ 已连接华为云 IoTDA！');
+    document.getElementById('connStatus').innerHTML = '● 已连接华为云';
+    document.getElementById('connStatus').style.color = 'var(--accent-green)';
+    document.getElementById('footerStatus').textContent = '华为云在线';
+
+    mqttClient.subscribe(HUAWEI_CONFIG.topic, { qos: 1 }, (err) => {
+      if (err) {
+        console.error('❌ 订阅失败:', err);
+      } else {
+        console.log('📡 已订阅 Topic:', HUAWEI_CONFIG.topic);
+      }
+    });
+  });
+
+  mqttClient.on('message', (topic, message) => {
+    try {
+      const raw = JSON.parse(message.toString());
+      console.log('📥 MQTT 消息:', raw);
+
+      const props = raw.services?.[0]?.properties;
+      if (!props) {
+        console.warn('⚠️ 无法解析的消息格式:', raw);
+        return;
+      }
+
+      const data = {
+        timestamp: new Date().toISOString(),
+        exercises: {
+          squat: {
+            count:  props.squat  || 0,
+            target: CONFIG.targets.squat,
+            sqdee:  props.sqdee  || 0,
+            sqbac:  props.sqbac  || 0
+          },
+          jack: {
+            count:  props.jumpe  || 0,
+            target: CONFIG.targets.jack,
+            jopen:  props.jopen  || 0
+          },
+          plank: {
+            time:   props.pbtim  || 0,
+            target: CONFIG.targets.plank,
+            pbbod:  props.pbbod  || 0
+          }
+        },
+        overall_score: 0
+      };
+
+      handleIncomingData(data);
+    } catch (e) {
+      console.error('❌ 消息解析异常:', e);
+    }
+  });
+
+  mqttClient.on('error', (err) => {
+    console.error('❌ MQTT 错误:', err);
+    document.getElementById('connStatus').innerHTML = '● 连接失败';
+    document.getElementById('connStatus').style.color = 'var(--accent-red)';
+    document.getElementById('footerStatus').textContent = '连接异常';
+  });
+
+  mqttClient.on('close', () => {
+    console.log('🔌 MQTT 连接已断开');
+    document.getElementById('connStatus').innerHTML = '● 已断开';
+    document.getElementById('connStatus').style.color = 'var(--accent-yellow)';
+    document.getElementById('footerStatus').textContent = '连接断开';
+  });
+
+  mqttClient.on('reconnect', () => {
+    console.log('🔄 正在重连...');
+    document.getElementById('footerStatus').textContent = '重连中...';
+  });
+}
+
+function mqttDisconnect() {
+  if (mqttClient) {
+    mqttClient.end();
+    mqttClient = null;
+    console.log('🔌 已主动断开 MQTT');
+  }
+}
+
+// ═══════════════════════════════════════════════
+// 如需切回 MQTT 直连：取消下方注释
+// ═══════════════════════════════════════════════
+// mqttConnect();
+
+</script>
+<!-- ==================== 达标提示浮层 ==================== -->
+<div class="completion-toast" id="completionToast">
+  <span class="toast-icon">🎉</span>
+  <div class="toast-title">🎯 今日任务全部达标！</div>
+  <div class="toast-detail" id="toastDetail"></div>
+</div>
+
+</body>
+</html>
